@@ -10,9 +10,28 @@ dotenv.config();
 const router = express.Router();
 
 // ================== In-memory OTP store ==================
-const otpStore = {}; // You can replace this with a DB if needed
+const otpStore = {}; // ⚠️ Temporary store — can later move to Redis or DB for persistence
 
-// =============== Register =================
+// ================== Helper: Email Transporter ==================
+const transporter = nodemailer.createTransport({
+  host: "smtp.gmail.com",
+  port: 465,
+  secure: true, // use SSL
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
+
+transporter.verify((error, success) => {
+  if (error) {
+    console.error("❌ Email transporter error:", error);
+  } else {
+    console.log("📧 Email transporter ready — OTP emails can be sent");
+  }
+});
+
+// ================== REGISTER ==================
 router.post("/register", async (req, res) => {
   try {
     const { name, email, password, avatarUrl } = req.body;
@@ -53,7 +72,7 @@ router.post("/register", async (req, res) => {
   }
 });
 
-// =============== Login =================
+// ================== LOGIN ==================
 router.post("/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -90,7 +109,7 @@ router.post("/login", async (req, res) => {
   }
 });
 
-// =============== Send OTP =================
+// ================== SEND OTP ==================
 router.post("/send-otp", async (req, res) => {
   const { email } = req.body;
 
@@ -102,40 +121,37 @@ router.post("/send-otp", async (req, res) => {
     const otp = Math.floor(100000 + Math.random() * 900000);
     otpStore[email] = {
       otp,
-      expiresAt: Date.now() + 5 * 60 * 1000, // 5 minutes
+      expiresAt: Date.now() + 5 * 60 * 1000, // 5 minutes validity
     };
 
-    const transporter = nodemailer.createTransport({
-      service: "gmail",
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS,
-      },
-    });
-
     const mailOptions = {
-      from: `Clinigoal <${process.env.EMAIL_USER}>`,
+      from: `"Clinigoal Support" <${process.env.EMAIL_USER}>`,
       to: email,
-      subject: "Clinigoal Password Reset OTP",
+      subject: "🔐 Clinigoal Password Reset OTP",
       html: `
-        <h2>🔐 Password Reset Request</h2>
-        <p>Hello,</p>
-        <p>Your OTP for password reset is: <b>${otp}</b></p>
-        <p>This OTP will expire in <b>5 minutes</b>.</p>
-        <br/>
-        <p>Regards,<br/>Clinigoal Team</p>
+        <div style="font-family:Arial, sans-serif; background:#f8f9fa; padding:20px; border-radius:8px;">
+          <h2 style="color:#0a58ca;">Password Reset Request</h2>
+          <p>Hello ${user.name || "User"},</p>
+          <p>Your OTP for password reset is:</p>
+          <h1 style="color:#0a58ca; font-size:32px; letter-spacing:3px;">${otp}</h1>
+          <p>This OTP will expire in <b>5 minutes</b>.</p>
+          <p>If you didn’t request this, you can safely ignore this email.</p>
+          <p style="margin-top:20px;">— Clinigoal Team</p>
+        </div>
       `,
     };
 
     await transporter.sendMail(mailOptions);
+    console.log(`✅ OTP sent successfully to ${email}`);
+
     res.json({ message: "OTP sent successfully to your email" });
   } catch (err) {
-    console.error("OTP Send Error:", err);
+    console.error("❌ OTP Send Error:", err);
     res.status(500).json({ message: "Failed to send OTP" });
   }
 });
 
-// =============== Reset Password =================
+// ================== RESET PASSWORD ==================
 router.post("/reset-password", async (req, res) => {
   const { email, otp, newPassword } = req.body;
 
@@ -152,7 +168,7 @@ router.post("/reset-password", async (req, res) => {
 
     await User.updateOne({ email }, { $set: { passwordHash: hashedPassword } });
 
-    delete otpStore[email];
+    delete otpStore[email]; // ✅ cleanup after successful reset
 
     res.json({ message: "Password reset successful" });
   } catch (err) {
