@@ -455,4 +455,14 @@ app.post("/api/progress/video", async (req, res) => {
 });
 
 // ----------------- START SERVER -----------------
-app.listen(PORT, () => console.log(`🚀 Server running on http://localhost:${PORT}`));
+// ----------------- START SERVER -----------------
+
+// ✅ Health check route for Render
+app.get("/", (req, res) => {
+  res.send("✅ Clinigoal server is running successfully on Render!");
+});
+
+// ✅ Just use PORT (no const declaration again)
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+});
