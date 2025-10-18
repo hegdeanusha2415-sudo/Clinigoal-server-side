@@ -1,3 +1,4 @@
+// ----------------- LOAD DEPENDENCIES -----------------
 require("dotenv").config();
 const express = require("express");
 const mongoose = require("mongoose");
@@ -6,7 +7,7 @@ const bodyParser = require("body-parser");
 const Razorpay = require("razorpay");
 const nodemailer = require("nodemailer");
 const bcrypt = require("bcryptjs");
-const multer = require("multer"); // ✅ Added for photo upload
+const multer = require("multer");
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -14,14 +15,14 @@ const PORT = process.env.PORT || 5000;
 // ----------------- MIDDLEWARE -----------------
 app.use(
   cors({
-    origin: [/\.vercel\.app$/, "http://localhost:3000"],
+    origin: [
+      "http://localhost:3000",
+      "https://clinigoal.vercel.app",
+      /\.vercel\.app$/,
+    ],
     credentials: true,
   })
 );
-
-
-
-
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
@@ -94,7 +95,7 @@ const userSchema = new mongoose.Schema({
   password: String,
   otp: String,
   otpExpiry: Date,
-  profilePhoto: { type: String, default: "" }, // ✅ Profile photo (Base64)
+  profilePhoto: { type: String, default: "" },
 });
 const User = mongoose.model("User", userSchema);
 
@@ -106,31 +107,25 @@ const checkPaymentApproved = async (userId, courseId) => {
 
 // ----------------- NODEMAILER SETUP -----------------
 const transporter = nodemailer.createTransport({
-  host: "smtp.gmail.com",
-  port: 465,
-  secure: true,
+  service: "gmail",
   auth: {
     user: process.env.EMAIL_USER || "youremail@gmail.com",
     pass: process.env.EMAIL_PASS || "yourapppassword",
   },
 });
 
-// ✅ Verify transporter connection
-transporter.verify((error, success) => {
-  if (error) {
-    console.error("❌ Email transporter error:", error);
-  } else {
-    console.log("📧 Email transporter ready to send messages");
-  }
+transporter.verify((error) => {
+  if (error) console.error("❌ Email transporter error:", error);
+  else console.log("📧 Email transporter ready");
 });
 
 // ----------------- MULTER CONFIG -----------------
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
-// ----------------- USER AUTH ROUTES -----------------
-
-// 1️⃣ Register
+// ========================================================================
+// 👤 USER AUTH ROUTES
+// ========================================================================
 app.post("/api/user/register", async (req, res) => {
   try {
     const { name, email, password } = req.body;
@@ -142,12 +137,11 @@ app.post("/api/user/register", async (req, res) => {
     await newUser.save();
 
     res.json({ success: true, message: "Registration successful" });
-  } catch (err) {
+  } catch {
     res.status(500).json({ message: "Error during registration" });
   }
 });
 
-// 2️⃣ Login
 app.post("/api/user/login", async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -158,12 +152,61 @@ app.post("/api/user/login", async (req, res) => {
     if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
 
     res.json({ success: true, message: "Login successful", user });
-  } catch (err) {
+  } catch {
     res.status(500).json({ message: "Error during authentication" });
   }
 });
 
-// 3️⃣ Forgot Password (Send OTP) — Updated to real email sending
+// ========================================================================
+// 🛡️ ADMIN REGISTER & LOGIN
+// ========================================================================
+app.post("/api/admin/register", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const existing = await Admin.findOne({ email });
+    if (existing) return res.status(400).json({ message: "Admin already exists" });
+
+    const hashed = await bcrypt.hash(password, 10);
+    const newAdmin = new Admin({ email, password: hashed });
+    await newAdmin.save();
+
+    res.json({ success: true, message: "Admin registered successfully" });
+  } catch (err) {
+    res.status(500).json({ message: "Error registering admin" });
+  }
+});
+
+app.post("/api/admin/login", async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const admin = await Admin.findOne({ email });
+    if (!admin) return res.status(404).json({ message: "Admin not found" });
+
+    const isMatch = await bcrypt.compare(password, admin.password);
+    if (!isMatch) return res.status(401).json({ message: "Invalid credentials" });
+
+    // ✅ Generate token for security
+    const jwt = require("jsonwebtoken");
+    const token = jwt.sign(
+      { id: admin._id, email: admin.email },
+      process.env.JWT_SECRET || "clinigoal_secret_key",
+      { expiresIn: "7d" }
+    );
+
+    res.json({
+      success: true,
+      message: "Admin login successful",
+      admin: { email: admin.email },
+      token,
+    });
+  } catch (err) {
+    res.status(500).json({ message: "Error logging in admin" });
+  }
+});
+
+// ========================================================================
+// 🔐 USER PASSWORD RESET
+// ========================================================================
 app.post("/api/forgot-password/send-otp", async (req, res) => {
   try {
     const { email } = req.body;
@@ -175,33 +218,19 @@ app.post("/api/forgot-password/send-otp", async (req, res) => {
     user.otpExpiry = Date.now() + 10 * 60 * 1000;
     await user.save();
 
-    const mailOptions = {
+    await transporter.sendMail({
       from: `"Clinigoal Support" <${process.env.EMAIL_USER}>`,
       to: email,
       subject: "🔐 Clinigoal Password Reset OTP",
-      html: `
-        <div style="font-family:Arial, sans-serif; padding:20px; border-radius:8px; background:#f8f9fa;">
-          <h2 style="color:#0a58ca;">Clinigoal Password Reset</h2>
-          <p>Hello <b>${user.name || "User"}</b>,</p>
-          <p>Your OTP for password reset is:</p>
-          <h1 style="color:#0a58ca; font-size:30px; letter-spacing:3px;">${otp}</h1>
-          <p>This code is valid for <b>10 minutes</b>.</p>
-          <p>If you didn’t request this, you can safely ignore this email.</p>
-          <p style="margin-top:20px;">— Clinigoal Support Team</p>
-        </div>
-      `,
-    };
+      html: `<h2>Your OTP is ${otp}</h2>`,
+    });
 
-    await transporter.sendMail(mailOptions);
-    console.log(`✅ OTP sent to ${email}`);
     res.json({ message: "OTP sent successfully" });
   } catch (err) {
-    console.error("❌ Error sending OTP:", err);
     res.status(500).json({ message: "Error sending OTP" });
   }
 });
 
-// 4️⃣ Verify OTP
 app.post("/api/forgot-password/verify-otp", async (req, res) => {
   try {
     const { email, otp } = req.body;
@@ -215,7 +244,6 @@ app.post("/api/forgot-password/verify-otp", async (req, res) => {
   }
 });
 
-// 5️⃣ Reset Password
 app.post("/api/forgot-password/reset", async (req, res) => {
   try {
     const { email, newPassword } = req.body;
@@ -233,7 +261,9 @@ app.post("/api/forgot-password/reset", async (req, res) => {
   }
 });
 
-// ✅ 6️⃣ Upload Profile Photo
+// ========================================================================
+// 🖼️ USER UPLOAD & PROFILE
+// ========================================================================
 app.post("/api/user/upload-photo/:id", upload.single("photo"), async (req, res) => {
   try {
     const userId = req.params.id;
@@ -248,7 +278,6 @@ app.post("/api/user/upload-photo/:id", upload.single("photo"), async (req, res) 
   }
 });
 
-// ✅ 7️⃣ Get User Profile
 app.get("/api/user/:id/profile", async (req, res) => {
   try {
     const user = await User.findById(req.params.id).select("name email profilePhoto");
@@ -259,7 +288,6 @@ app.get("/api/user/:id/profile", async (req, res) => {
   }
 });
 
-// ✅ 8️⃣ Remove Profile Photo
 app.delete("/api/user/:id/remove-photo", async (req, res) => {
   try {
     await User.findByIdAndUpdate(req.params.id, { profilePhoto: "" });
@@ -269,75 +297,9 @@ app.delete("/api/user/:id/remove-photo", async (req, res) => {
   }
 });
 
-// ----------------- ADMIN OTP ROUTES (Enhanced) -----------------
-app.post("/api/admin/forgot-password/send-otp", async (req, res) => {
-  try {
-    const { email } = req.body;
-    const admin = await Admin.findOne({ email });
-    if (!admin) return res.status(404).json({ message: "Admin not found" });
-
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
-    admin.otp = otp;
-    admin.otpExpiry = Date.now() + 10 * 60 * 1000;
-    await admin.save();
-
-    const mailOptions = {
-      from: `"Clinigoal Admin" <${process.env.EMAIL_USER}>`,
-      to: email,
-      subject: "🔐 Clinigoal Admin OTP Verification",
-      html: `
-        <div style="font-family:Arial, sans-serif; padding:20px; border-radius:8px; background:#f8f9fa;">
-          <h2 style="color:#dc3545;">Clinigoal Admin Verification</h2>
-          <p>Dear Admin,</p>
-          <p>Your OTP for password reset is:</p>
-          <h1 style="color:#dc3545; font-size:30px; letter-spacing:3px;">${otp}</h1>
-          <p>This OTP will expire in <b>10 minutes</b>.</p>
-          <p>If this was not you, please secure your account immediately.</p>
-          <p style="margin-top:20px;">— Clinigoal Security Team</p>
-        </div>
-      `,
-    };
-
-    await transporter.sendMail(mailOptions);
-    console.log(`✅ Admin OTP sent to ${email}`);
-    res.json({ message: "OTP sent successfully!" });
-  } catch (err) {
-    console.error("❌ Error sending admin OTP:", err);
-    res.status(500).json({ message: "Error sending OTP" });
-  }
-});
-
-app.post("/api/admin/forgot-password/verify-otp", async (req, res) => {
-  try {
-    const { email, otp } = req.body;
-    const admin = await Admin.findOne({ email });
-    if (!admin || admin.otp !== otp || Date.now() > admin.otpExpiry)
-      return res.status(400).json({ message: "Invalid or expired OTP" });
-
-    res.json({ message: "OTP verified successfully" });
-  } catch (err) {
-    res.status(500).json({ message: "Error verifying OTP" });
-  }
-});
-
-app.post("/api/admin/forgot-password/reset", async (req, res) => {
-  try {
-    const { email, newPassword } = req.body;
-    const admin = await Admin.findOne({ email });
-    if (!admin) return res.status(404).json({ message: "Admin not found" });
-
-    admin.password = await bcrypt.hash(newPassword, 10);
-    admin.otp = null;
-    admin.otpExpiry = null;
-    await admin.save();
-
-    res.json({ message: "Password reset successfully" });
-  } catch (err) {
-    res.status(500).json({ message: "Error resetting password" });
-  }
-});
-
-// ----------------- COURSE ROUTES -----------------
+// ========================================================================
+// 📚 COURSES
+// ========================================================================
 app.get("/api/courses", async (req, res) => {
   try {
     const courses = await Course.find();
@@ -357,7 +319,9 @@ app.post("/api/courses", async (req, res) => {
   }
 });
 
-// ----------------- PAYMENT ROUTES -----------------
+// ========================================================================
+// 💳 PAYMENTS
+// ========================================================================
 app.post("/api/payments/create-order", async (req, res) => {
   const { amount } = req.body;
   try {
@@ -396,16 +360,6 @@ app.post("/api/payments/approve", async (req, res) => {
   }
 });
 
-app.get("/api/payments", async (req, res) => {
-  const { userId } = req.query;
-  try {
-    const payments = await Payment.find({ userId, status: "Approved" });
-    res.json(payments);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
 app.get("/api/payments/all", async (req, res) => {
   try {
     const payments = await Payment.find().sort({ date: -1 });
@@ -415,7 +369,9 @@ app.get("/api/payments/all", async (req, res) => {
   }
 });
 
-// ----------------- REVIEWS -----------------
+// ========================================================================
+// ⭐ REVIEWS
+// ========================================================================
 app.get("/api/reviews", async (req, res) => {
   try {
     const reviews = await Review.find().sort({ date: -1 });
@@ -435,7 +391,9 @@ app.post("/api/reviews", async (req, res) => {
   }
 });
 
-// ----------------- USER PROGRESS -----------------
+// ========================================================================
+// 🎯 USER PROGRESS
+// ========================================================================
 app.get("/api/progress", async (req, res) => {
   const { userId, courseId } = req.query;
   try {
@@ -463,16 +421,16 @@ app.post("/api/progress/video", async (req, res) => {
   }
 });
 
-// ----------------- START SERVER -----------------
-// ----------------- START SERVER -----------------
-
-// ✅ Health check route for Render
-// ----------------- HEALTH CHECK -----------------
+// ========================================================================
+// 🩺 HEALTH CHECK
+// ========================================================================
 app.get("/", (req, res) => {
   res.send("✅ Clinigoal server is running successfully on Render!");
 });
 
-// ----------------- START SERVER -----------------
+// ========================================================================
+// 🚀 START SERVER
+// ========================================================================
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`🚀 Server running on port ${PORT}`);
 });
