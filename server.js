@@ -14,13 +14,11 @@ const PORT = process.env.PORT || 5000;
 // ----------------- MIDDLEWARE -----------------
 app.use(
   cors({
-    origin: [
-      "https://clinigoal-client-side.vercel.app",
-      "http://localhost:3000",
-    ],
+    origin: [/\.vercel\.app$/, "http://localhost:3000"],
     credentials: true,
   })
 );
+
 
 
 

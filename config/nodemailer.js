@@ -1,24 +1,33 @@
 // config/nodemailer.js
-import Sib from "@sendinblue/client";
+import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 
 dotenv.config();
 
-const client = new Sib.TransactionalEmailsApi();
-client.setApiKey(Sib.TransactionalEmailsApiApiKeys.apiKey, process.env.BREVO_API_KEY);
+// ✅ Create reusable transporter
+export const transporter = nodemailer.createTransport({
+  service: "gmail", // or use "smtp.mailtrap.io" for testing
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
+  },
+});
 
+// ✅ Send mail function
 export const sendMail = async (to, subject, htmlContent) => {
   try {
-    const response = await client.sendTransacEmail({
-      sender: { email: process.env.EMAIL_USER, name: "Clinigoal" },
-      to: [{ email: to }],
+    const mailOptions = {
+      from: `"My App" <${process.env.EMAIL_USER}>`,
+      to,
       subject,
-      htmlContent,
-    });
-    console.log("✅ Email sent:", response.messageId || response);
+      html: htmlContent,
+    };
+
+    const info = await transporter.sendMail(mailOptions);
+    console.log("✅ Email sent:", info.response);
     return true;
   } catch (error) {
-    console.error("❌ Error sending email:", error.message);
+    console.error("❌ Error sending email:", error);
     return false;
   }
 };
