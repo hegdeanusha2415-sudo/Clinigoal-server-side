@@ -2,6 +2,7 @@
   "name": "clinigoal-server",
   "version": "1.0.0",
   "description": "Backend server for Clinigoal using Express, MongoDB, and Node.js",
+  "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
